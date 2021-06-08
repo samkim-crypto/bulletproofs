@@ -1,12 +1,8 @@
 //! The `generators` module contains API for producing a
 //! set of generators for a rangeproof.
 
-#![allow(non_snake_case)]
-#![deny(missing_docs)]
+#![allow(non_snake_case, dead_code)]
 
-extern crate alloc;
-
-use alloc::vec::Vec;
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_COMPRESSED;
 use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT;
 use curve25519_dalek::ristretto::RistrettoPoint;
@@ -165,15 +161,6 @@ impl BulletproofGens {
         gens
     }
 
-    /// Returns j-th share of generators, with an appropriate
-    /// slice of vectors G and H for the j-th range proof.
-    pub fn share(&self, j: usize) -> BulletproofGensShare<'_> {
-        BulletproofGensShare {
-            gens: &self,
-            share: j,
-        }
-    }
-
     /// Increases the generators' capacity to the amount specified.
     /// If less than or equal to the current capacity, does nothing.
     pub fn increase_capacity(&mut self, new_capacity: usize) {
@@ -233,7 +220,6 @@ struct AggregatedGensIter<'a> {
     party_idx: usize,
     gen_idx: usize,
 }
-
 impl<'a> Iterator for AggregatedGensIter<'a> {
     type Item = &'a RistrettoPoint;
 
@@ -283,74 +269,5 @@ impl<'a> BulletproofGensShare<'a> {
     /// Return an iterator over this party's H generators with given size `n`.
     pub(crate) fn H(&self, n: usize) -> impl Iterator<Item = &'a RistrettoPoint> {
         self.gens.H_vec[self.share].iter().take(n)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn aggregated_gens_iter_matches_flat_map() {
-        let gens = BulletproofGens::new(64, 8);
-
-        let helper = |n: usize, m: usize| {
-            let agg_G: Vec<RistrettoPoint> = gens.G(n, m).cloned().collect();
-            let flat_G: Vec<RistrettoPoint> = gens
-                .G_vec
-                .iter()
-                .take(m)
-                .flat_map(move |G_j| G_j.iter().take(n))
-                .cloned()
-                .collect();
-
-            let agg_H: Vec<RistrettoPoint> = gens.H(n, m).cloned().collect();
-            let flat_H: Vec<RistrettoPoint> = gens
-                .H_vec
-                .iter()
-                .take(m)
-                .flat_map(move |H_j| H_j.iter().take(n))
-                .cloned()
-                .collect();
-
-            assert_eq!(agg_G, flat_G);
-            assert_eq!(agg_H, flat_H);
-        };
-
-        helper(64, 8);
-        helper(64, 4);
-        helper(64, 2);
-        helper(64, 1);
-        helper(32, 8);
-        helper(32, 4);
-        helper(32, 2);
-        helper(32, 1);
-        helper(16, 8);
-        helper(16, 4);
-        helper(16, 2);
-        helper(16, 1);
-    }
-
-    #[test]
-    fn resizing_small_gens_matches_creating_bigger_gens() {
-        let gens = BulletproofGens::new(64, 8);
-
-        let mut gen_resized = BulletproofGens::new(32, 8);
-        gen_resized.increase_capacity(64);
-
-        let helper = |n: usize, m: usize| {
-            let gens_G: Vec<RistrettoPoint> = gens.G(n, m).cloned().collect();
-            let gens_H: Vec<RistrettoPoint> = gens.H(n, m).cloned().collect();
-
-            let resized_G: Vec<RistrettoPoint> = gen_resized.G(n, m).cloned().collect();
-            let resized_H: Vec<RistrettoPoint> = gen_resized.H(n, m).cloned().collect();
-
-            assert_eq!(gens_G, resized_G);
-            assert_eq!(gens_H, resized_H);
-        };
-
-        helper(64, 8);
-        helper(32, 8);
-        helper(16, 8);
     }
 }

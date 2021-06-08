@@ -1,3 +1,11 @@
+# Bulletproofs with Deterministic RangeProof Verification
+
+This is a fork of the dalek-cryptography bulletproofs library for testing range
+proofs on the Solana blockchain. The library only contains the range proof
+verification functions of the original bulletproofs library. In addition, the
+verification functions are modified such that they derive randomness from the
+hash of the proof transcript.
+
 # Bulletproofs
 
 <img
