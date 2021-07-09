@@ -142,5 +142,45 @@ impl BulletproofGens {
 
         self.gens_capacity = new_capacity;
     }
+
+    pub(crate) fn G(&self, n: usize) -> impl Iterator<Item = &RistrettoPoint> {
+        GensIter {
+            array: &self.G_vec,
+            n,
+            gen_idx: 0,
+        }
+    }
+
+    pub(crate) fn H(&self, n: usize) -> impl Iterator<Item = &RistrettoPoint> {
+        GensIter {
+            array: &self.H_vec,
+            n,
+            gen_idx: 0,
+        }
+    }
 }
 
+struct GensIter<'a> {
+    array: &'a Vec<RistrettoPoint>,
+    n: usize,
+    gen_idx: usize,
+}
+
+impl <'a> Iterator for GensIter<'a> {
+    type Item = &'a RistrettoPoint;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.gen_idx >= self.n {
+            None
+        } else {
+            let cur_gen = self.gen_idx;
+            self.gen_idx += 1;
+            Some(&self.array[cur_gen])
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.n - self.gen_idx;
+        (size, Some(size))
+    }
+}

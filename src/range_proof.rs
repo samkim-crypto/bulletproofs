@@ -1,10 +1,11 @@
 #![allow(non_snake_case)]
 
 use core::iter;
+use subtle::{Choice, ConditionallySelectable};
 
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
-use curve25519_dalek::traits::{IsIdentity, VartimeMultiscalarMul};
+use curve25519_dalek::traits::{IsIdentity, MultiscalarMul, VartimeMultiscalarMul};
 use merlin::Transcript;
 
 use crate::errors::ProofError;
@@ -12,6 +13,8 @@ use crate::generators::{BulletproofGens, PedersenGens};
 use crate::inner_product_proof::InnerProductProof;
 use crate::transcript::TranscriptProtocol;
 use crate::util;
+
+use rand_core::{CryptoRng, RngCore};
 
 /// The `RangeProof` struct represents a proof that one or more values
 /// are in a range.
@@ -57,6 +60,110 @@ pub struct RangeProof {
 }
 
 impl RangeProof {
+
+    pub fn prove<T: RngCore + CryptoRng>(
+        bp_gens: &BulletproofGens,
+        pc_gens: &PedersenGens,
+        transcript: &mut Transcript,
+        value: u64,
+        v_blinding: Scalar,
+        n: usize,
+        rng: &mut T,
+    ) -> Result<RangeProof, ProofError> {
+
+        if bp_gens.gens_capacity < n {
+            return Err(ProofError::InvalidGeneratorsLength);
+        }
+
+        transcript.rangeproof_domain_sep(n as u64);
+
+        let V = pc_gens.commit(value.into(), v_blinding).compress();
+        transcript.append_point(b"V", &V);
+
+        // bit-decompose value
+        let a_blinding = Scalar::random(rng);
+        let mut A = pc_gens.B_blinding * a_blinding;
+
+        let mut i = 0;
+        for (G_i, H_i) in bp_gens.G(n).zip(bp_gens.H(n)) {
+            let v_i = Choice::from(((value >> i) & 1) as u8);
+            let mut point = -H_i;
+            point.conditional_assign(G_i, v_i);
+            A += point;
+            i += 1;
+        }
+
+        let s_blinding = Scalar::random(rng);
+        let s_L: Vec<Scalar> = (0..n).map(|_| Scalar::random(rng)).collect();
+        let s_R: Vec<Scalar> = (0..n).map(|_| Scalar::random(rng)).collect();
+
+        let S = RistrettoPoint::multiscalar_mul(
+            iter::once(&s_blinding).chain(s_L.iter()).chain(s_R.iter()),
+            iter::once(&pc_gens.B_blinding)
+                .chain(bp_gens.G(n))
+                .chain(bp_gens.H(n))
+        );
+
+        transcript.append_point(b"A", &A.compress());
+        transcript.append_point(b"S", &S.compress());
+
+        // commit to T1 and T2
+
+        let y = Scalar::random(rng);
+        let z = Scalar::random(rng);
+        let zz = z * z;
+
+        let mut l_poly = util::VecPoly1::zero(n);
+        let mut r_poly = util::VecPoly1::zero(n);
+
+        let mut exp_y = Scalar::one();
+        let mut exp_2 = Scalar::one();
+
+        for i in 0..n {
+            let a_L_i = Scalar::from((value>>i) & 1);
+            let a_R_i = a_L_i - Scalar::one();
+
+            l_poly.0[i] = a_L_i - z;
+            l_poly.1[i] = s_L[i];
+            r_poly.0[i] = exp_y * (a_R_i + z) + zz * exp_2;
+            r_poly.1[i] = exp_y * s_R[i];
+
+            exp_y *= y;
+            exp_2 = exp_2 + exp_2;
+        }
+
+        let t_poly = l_poly.inner_product(&r_poly);
+
+        let t_1_blinding = Scalar::random(rng);
+        let t_2_blinding = Scalar::random(rng);
+        let T_1 = pc_gens.commit(t_poly.1, t_1_blinding);
+        let T_2 = pc_gens.commit(t_poly.2, t_2_blinding);
+
+        transcript.append_point(b"T_1", &T_1.compress());
+        transcript.append_point(b"T_2", &T_2.compress());
+
+        let x = transcript.challenge_scalar(b"x");
+
+        let t_blinding_poly = util::Poly2(
+            zz * v_blinding,
+            t_1_blinding,
+            t_2_blinding,
+        );
+
+        // compute t_x
+        let t_x = t_poly.eval(x);
+        let t_x_blinding = t_blinding_poly.eval(x);
+        let e_blind = a_blinding + s_blinding * x;
+        let l_vec = l_poly.eval(x);
+        let r_vec = r_poly.eval(x);
+
+        transcript.append_scalar(b"t_x", &t_x);
+        transcript.append_scalar(b"t_x_blinding", &t_x_blinding);
+        // transcript.append_scalar(b"e_blinding", &e_blinding);
+
+        Err(ProofError::InvalidBitsize)
+    }
+
     /// Verifies a rangeproof for a given value commitment \\(V\\).
     pub fn verify_single(
         &self,
@@ -77,11 +184,8 @@ impl RangeProof {
         if bp_gens.gens_capacity < n {
             return Err(ProofError::InvalidGeneratorsLength);
         }
-        if bp_gens.party_capacity < m {
-            return Err(ProofError::InvalidGeneratorsLength);
-        }
 
-        transcript.rangeproof_domain_sep(n as u64, m as u64);
+        transcript.rangeproof_domain_sep(n as u64);
 
         for V in value_commitments.iter() {
             // Allow the commitments to be zero (0 value, 0 blinding)
@@ -155,8 +259,8 @@ impl RangeProof {
                 .chain(self.ipp_proof.R_vec.iter().map(|R| R.decompress()))
                 .chain(iter::once(Some(pc_gens.B_blinding)))
                 .chain(iter::once(Some(pc_gens.B)))
-                .chain(bp_gens.G(n, m).map(|&x| Some(x)))
-                .chain(bp_gens.H(n, m).map(|&x| Some(x)))
+                .chain(bp_gens.G(n).map(|&x| Some(x)))
+                .chain(bp_gens.H(n).map(|&x| Some(x)))
                 .chain(value_commitments.iter().map(|V| V.decompress())),
         )
         .ok_or_else(|| ProofError::VerificationError)?;
