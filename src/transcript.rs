@@ -13,6 +13,12 @@ pub trait TranscriptProtocol {
     /// Append a domain separator for a length-`n` inner product proof.
     fn innerproduct_domain_sep(&mut self, n: u64);
 
+    /// Append a domain separator for an El Gamal ciphertext validity proof.
+    fn ct_validity_domain_sep(&mut self);
+
+    /// Append a domain separator for an El Gamal ciphertext net zero proof.
+    fn net_zero_domain_sep(&mut self);
+
     /// Append a `scalar` with the given `label`.
     fn append_scalar(&mut self, label: &'static [u8], scalar: &Scalar);
 
@@ -40,6 +46,14 @@ impl TranscriptProtocol for Transcript {
     fn innerproduct_domain_sep(&mut self, n: u64) {
         self.append_message(b"dom-sep", b"ipp v1");
         self.append_u64(b"n", n);
+    }
+
+    fn ct_validity_domain_sep(&mut self) {
+        self.append_message(b"dom_sep", b"ct validity proof v1");
+    }
+
+    fn net_zero_domain_sep(&mut self) {
+        self.append_message(b"dom_sep", b"net zero proof v1");
     }
 
     fn append_scalar(&mut self, label: &'static [u8], scalar: &Scalar) {
