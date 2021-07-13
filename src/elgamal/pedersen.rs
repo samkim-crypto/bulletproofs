@@ -7,16 +7,10 @@ use curve25519_dalek::scalar::Scalar;
 use sha3::Sha3_512;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PedersenComm(pub CompressedRistretto);
+pub struct PedersenComm(pub RistrettoPoint);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PedersenOpen(pub Scalar);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PedersenPair {
-    pub comm: PedersenComm,
-    pub open: PedersenOpen,
-}
 
 #[allow(non_snake_case)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,15 +33,15 @@ impl Default for PedersenGens {
 pub struct Pedersen;
 impl Pedersen {
     #[allow(non_snake_case)]
-    pub fn commit(amount: u64) -> PedersenPair {
+    pub fn commit(amount: u64) -> (PedersenComm, PedersenOpen) {
         let secret_scalar = Scalar::random(&mut thread_rng());
 
         let PedersenGens { G, H } = PedersenGens::default();
 
-        let comm = PedersenComm((Scalar::from(amount) * G + secret_scalar * H).compress());
+        let comm = PedersenComm(Scalar::from(amount) * G + secret_scalar * H);
         let open = PedersenOpen(secret_scalar);
 
-        PedersenPair{ comm, open }
+        (comm, open)
     }
 
     #[allow(non_snake_case)]
@@ -57,7 +51,7 @@ impl Pedersen {
 
         let PedersenGens { G, H } = PedersenGens::default();
 
-        ct == (Scalar::from(amount) * G + open * H).compress()
+        ct.compress() == (Scalar::from(amount) * G + open * H).compress()
     }
 }
 

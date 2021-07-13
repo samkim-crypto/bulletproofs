@@ -17,7 +17,7 @@ impl ElGamal {
         (ElGamalPK(H), ElGamalSK(s))
     }
 
-    pub fn encrypt(pk: ElGamalPK, msg: GroupEncoding) -> ElGamalPair {
+    pub fn encrypt(pk: ElGamalPK, msg: GroupEncoding) -> (ElGamalCT, ElGamalRand) {
         let ElGamalPK(H) = pk;
         let GroupEncoding(M) = msg;
 
@@ -30,7 +30,7 @@ impl ElGamal {
 
         let rand = ElGamalRand(r);
 
-        ElGamalPair { ct, rand }
+        (ct, rand)
     }
 
     pub fn decrypt(sk: ElGamalSK, ct: ElGamalCT) -> GroupEncoding {
@@ -42,7 +42,7 @@ impl ElGamal {
 }
 
 impl GroupEncoding {
-    pub fn encrypt(self, pk: ElGamalPK) -> ElGamalPair {
+    pub fn encrypt(self, pk: ElGamalPK) -> (ElGamalCT, ElGamalRand) {
         ElGamal::encrypt(pk, self)
     }
 }
@@ -50,7 +50,7 @@ impl GroupEncoding {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ElGamalPK(pub RistrettoPoint);
 impl ElGamalPK {
-    pub fn encrypt(self, msg: GroupEncoding) -> ElGamalPair {
+    pub fn encrypt(self, msg: GroupEncoding) -> (ElGamalCT, ElGamalRand) {
         ElGamal::encrypt(self, msg)
     }
 }
@@ -76,12 +76,6 @@ impl ElGamalCT {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ElGamalRand(pub Scalar);
-
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ElGamalPair {
-    pub ct: ElGamalCT,
-    pub rand: ElGamalRand,
-}
 
 
 #[cfg(test)]

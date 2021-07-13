@@ -1,11 +1,14 @@
-use curve25519_dalek::constants::RISTRETTO_BASEPOINT_POINT as G;
-use curve25519_dalek::ristretto::CompressedRistretto;
+use core::iter;
+
+use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
+use curve25519_dalek::traits::{IsIdentity, VartimeMultiscalarMul};
 use curve25519_dalek::scalar::Scalar;
 use merlin::Transcript;
 
 use crate::elgamal::elgamal::ElGamalRand;
 use crate::elgamal::elgamal::ElGamalCT;
 use crate::elgamal::elgamal::ElGamalPK;
+use crate::elgamal::pedersen::PedersenGens;
 use crate::elgamal::pedersen::PedersenOpen;
 use crate::elgamal::pedersen::PedersenComm;
 use crate::transcript::TranscriptProtocol;
@@ -15,121 +18,126 @@ use rand_core::{CryptoRng, RngCore};
 
 #[allow(non_snake_case)]
 struct CTValidityProof {
-    R_0: [CompressedRistretto; 3],
-    R_1: [CompressedRistretto; 3],
-    R_2: [CompressedRistretto; 3],
-    z_0: [Scalar; 3],
-    z_1: Scalar,
-    z_2: Scalar,
+    Y_eg_0: CompressedRistretto,
+    Y_eg_1: CompressedRistretto,
+    Y_p: CompressedRistretto,
+    z_x: Scalar,
+    z_eg: Scalar,
+    z_p: Scalar,
 }
 
 #[allow(non_snake_case)]
 impl CTValidityProof {
-    fn prove<T: RngCore + CryptoRng>(
-        x_0: u32,
-        x_1: u32,
-        eg_rands: [ElGamalRand; 3],
-        ped_opens: [PedersenOpen; 3],
+    fn prove<T: Into<Scalar>, U: RngCore + CryptoRng>(
+        x: T,
+        eg_pk: ElGamalPK,
+        eg_ct: ElGamalCT,
+        eg_rand: ElGamalRand,
+        ped_gens: PedersenGens,
+        ped_comm: PedersenComm,
+        ped_open: PedersenOpen,
         transcript: &mut Transcript,
-        rng: &mut T,
+        rng: &mut U,
     ) -> Self {
-        let mut R_0 = [CompressedRistretto::default(); 3];
-        let mut R_1 = [CompressedRistretto::default(); 3];
-        let mut R_2 = [CompressedRistretto::default(); 3];
-        let mut z_0 = [Scalar::default(); 3];
-        let mut z_1 = Scalar::zero();
-        let mut z_2 = Scalar::zero();
-
-        let mut r_0 = [Scalar::default(); 3];
-        let mut r_1 = [Scalar::default(); 3];
-        let mut r_2 = [Scalar::default(); 3];
-
-        let x_2 = (x_0 as u64) + (x_1 as u64) << 32;
-        let x = [Scalar::from(x_0), Scalar::from(x_1), Scalar::from(x_2)];
-
         transcript.ct_validity_domain_sep();
 
-        for i in 0..3 {
-            r_0[i] = Scalar::random(rng);
-            r_1[i] = Scalar::random(rng);
-            r_2[i] = Scalar::random(rng);
+        let G = ped_gens.G;
+        let H_eg = eg_pk.0;
+        let H_p = ped_gens.H;
 
-            R_0[i] = (r_0[i] * G).compress();
-            R_1[i] = (r_1[i] * G).compress();
-            R_2[i] = (r_2[i] * G).compress();
+        let x = x.into();
+        let r_eg = eg_rand.0;
+        let r_p = ped_open.0;
 
-            transcript.append_point(b"R_0", &R_0[i]);
-            transcript.append_point(b"R_1", &R_1[i]);
-            transcript.append_point(b"R_2", &R_2[i]);
-        }
+        let y_x = Scalar::random(rng);
+        let y_eg = Scalar::random(rng);
+        let y_p = Scalar::random(rng);
+
+        let Y_eg_0 = (y_x * G + y_eg * H_eg).compress();
+        let Y_eg_1 = (y_eg * G).compress();
+        let Y_p = (y_x * G + y_p * H_p).compress();
+
+        transcript.append_point(b"Y_eg_0", &Y_eg_0);
+        transcript.append_point(b"Y_eg_1", &Y_eg_1);
+        transcript.append_point(b"Y_p", &Y_p);
 
         let c = transcript.challenge_scalar(b"c");
-        let y = transcript.challenge_scalar(b"y");
 
-        let mut exp_y = Scalar::one();
-        for i in 0..3 {
-            let r_eg = eg_rands[i].0;
-            let r_p = ped_opens[i].0;
-            let x = x[i];
-
-            z_0[i] = c * r_eg + r_0[i];
-            z_1 += (c * x + r_1[i]) * exp_y;
-            z_2 += (c * r_p + r_2[i]) * exp_y;
-
-            exp_y *= y;
-        }
+        let z_x = c * x + y_x;
+        let z_eg = c * r_eg + y_eg;
+        let z_p = c * r_p + y_p;
 
         CTValidityProof {
-            R_0,
-            R_1,
-            R_2,
-            z_0,
-            z_1,
-            z_2,
+            Y_eg_0,
+            Y_eg_1,
+            Y_p,
+            z_x,
+            z_eg,
+            z_p,
         }
     }
 
     fn verify(
-        eg_pks: [ElGamalPK; 3],
-        eg_cts: [ElGamalCT; 3],
-        ped_comms: [PedersenComm; 3],
+        eg_pk: ElGamalPK,
+        eg_ct: ElGamalCT,
+        ped_gens: PedersenGens,
+        ped_comm: PedersenComm,
         transcript: &mut Transcript,
         proof: CTValidityProof,
     ) -> Result<(), ProofError> {
-        let CTValidityProof {
-            R_0,
-            R_1,
-            R_2,
-            z_0,
-            z_1,
-            z_2,
-        } = proof;
-
         transcript.ct_validity_domain_sep();
 
-        for i in 0..3 {
-            transcript.validate_and_append_point(b"R_0", &R_0[i]);
-            transcript.validate_and_append_point(b"R_1", &R_1[i]);
-            transcript.validate_and_append_point(b"R_2", &R_2[i]);
-        }
+        let G = ped_gens.G;
+        let H_eg = eg_pk.0;
+        let H_p = ped_gens.H;
+
+        let CTValidityProof {
+            Y_eg_0,
+            Y_eg_1,
+            Y_p,
+            z_x,
+            z_eg,
+            z_p,
+        } = proof;
+
+        transcript.validate_and_append_point(b"Y_eg_0", &Y_eg_0)?;
+        transcript.validate_and_append_point(b"Y_eg_1", &Y_eg_1)?;
+        transcript.validate_and_append_point(b"Y_p", &Y_p);
 
         let c = transcript.challenge_scalar(b"c");
-        let y = transcript.challenge_scalar(b"y");
+        let w = transcript.clone().challenge_scalar(b"w"); // can otpionally be randomized
 
-        let mut exp_y = Scalar::one();
-        for i in 0..3 {
-            let z_0 = z_0[i];
-            let z_1 = z_1[i];
-            let z_2 = z_2[i];
+        let mega_check = RistrettoPoint::optional_multiscalar_mul(
+            iter::once(z_x)
+                .chain(iter::once(z_eg))
+                .chain(iter::once(-c))
+                .chain(iter::once(-Scalar::one()))
+                .chain(iter::once(w * z_eg))
+                .chain(iter::once(-w * c))
+                .chain(iter::once(-Scalar::one()))
+                .chain(iter::once(z_x))
+                .chain(iter::once(z_p))
+                .chain(iter::once(-c))
+                .chain(iter::once(-Scalar::one())),
+            iter::once(Some(G))
+                .chain(iter::once(Some(H_eg)))
+                .chain(iter::once(Some(eg_ct.c0)))
+                .chain(iter::once(Y_eg_0.decompress()))
+                .chain(iter::once(Some(G)))
+                .chain(iter::once(Some(eg_ct.c1)))
+                .chain(iter::once(Y_eg_1.decompress()))
+                .chain(iter::once(Some(G)))
+                .chain(iter::once(Some(H_p)))
+                .chain(iter::once(Some(ped_comm.0)))
+                .chain(iter::once(Y_p.decompress()))
+        )
+        .ok_or_else(|| ProofError::VerificationError)?;
 
-            let H = eg_pks[i].0;
-            let ElGamalCT { c0: ct_0, c1: ct_1 } = eg_cts[i];
-
-            let R_0 = R_0[i].decompress();
-
+        if mega_check.is_identity() {
+            Ok(())
+        } else {
+            Err(ProofError::VerificationError)
         }
-
-        Ok(())
     }
 }
 
