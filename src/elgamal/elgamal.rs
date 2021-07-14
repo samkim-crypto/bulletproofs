@@ -24,8 +24,8 @@ impl ElGamal {
         let r = Scalar::random(&mut thread_rng());
 
         let ct = ElGamalCT {
-            c0: M + r * H,
-            c1: r * G,
+            C_0: M + r * H,
+            C_1: r * G,
         };
 
         let rand = ElGamalRand(r);
@@ -35,9 +35,9 @@ impl ElGamal {
 
     pub fn decrypt(sk: ElGamalSK, ct: ElGamalCT) -> GroupEncoding {
         let ElGamalSK(s) = sk;
-        let ElGamalCT { c0, c1 } = ct;
+        let ElGamalCT { C_0, C_1 } = ct;
 
-        GroupEncoding(c0 - s * c1)
+        GroupEncoding(C_0 - s * C_1)
     }
 }
 
@@ -65,8 +65,8 @@ impl ElGamalSK {
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ElGamalCT {
-    pub c0: RistrettoPoint,
-    pub c1: RistrettoPoint,
+    pub C_0: RistrettoPoint,
+    pub C_1: RistrettoPoint,
 }
 impl ElGamalCT {
     pub fn decrypt(self, sk: ElGamalSK) -> GroupEncoding {
