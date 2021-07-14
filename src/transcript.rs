@@ -14,7 +14,10 @@ pub trait TranscriptProtocol {
     fn innerproduct_domain_sep(&mut self, n: u64);
 
     /// Append a domain separator for an El Gamal ciphertext validity proof.
-    fn ct_validity_domain_sep(&mut self);
+    fn in_ct_validity_domain_sep(&mut self);
+
+    /// Append a domain separator for an El Gamal ciphertext validity proof.
+    fn out_ct_validity_domain_sep(&mut self);
 
     /// Append a domain separator for an El Gamal ciphertext net zero proof.
     fn net_zero_domain_sep(&mut self);
